@@ -40,25 +40,37 @@ async function createPrompt(body: unknown, authorization: string): Promise<strin
     throw new Error(`Upstream error ${res.status} ${res.statusText} - ${text}`);
   }
   const data = await res.json();
-  if (!data?.id) throw new Error("Prompt-ID fehlt in der Antwort des Servers.");
+  if (!data?.id) throw new Error("Invalid response: Missing prompt ID");
   return data.id;
 }
 
-// Function for polling the prompt until it is completed
+// Function for polling the prompt until it is completed or times out
 async function pollPrompt(promptId: string, authorization: string): Promise<any> {
   const url = `https://m365-dev.d-velop.cloud/d42/api/v1/prompts/${encodeURIComponent(promptId)}`;
   let status = "";
   let result: any = null;
+
+  const timeoutMs = 60_000; // 1 minute
+  const startTime = Date.now();
+
   while (status !== "Completed") {
-    await delay(5000); // 5 Sekunden warten
+    // check for timeout
+    if (Date.now() - startTime > timeoutMs) {
+      throw new Error(`Polling timeout: Prompt ${promptId} did not complete within ${timeoutMs / 1000} seconds.`);
+    }
+
+    await delay(5000); // wait for 5 seconds before the next poll
     const res = await fetch(url, { method: "GET", headers: { Authorization: authorization } });
+
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(`Polling error ${res.status} ${res.statusText} - ${text}`);
     }
+
     result = await res.json();
     status = result.status;
   }
+
   return result;
 }
 
@@ -69,7 +81,7 @@ server.registerTool(
     title: "d.velop pilot request",
     description: "Ask the d.velop pilot about quality assurance documents and get a reponse.",
     inputSchema: {
-      question: z.string().min(1).describe("The question to ask the d.velop pilot."),
+      question: z.string().min(1).describe("The prompt/question to ask the assistant."),
     },
   },
   async ({ question }) => {
