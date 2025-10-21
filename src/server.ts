@@ -91,75 +91,6 @@ server.registerTool(
   }
 );
 
-// Output-Shape für get-user-info
-const getUserInfoOutputShape = {
-  id: z.string().uuid().describe("The unique user ID."),
-  userName: z.string().describe("The username."),
-  displayName: z.string().describe("The display name of the user."),
-  preferredLanguage: z.string().optional().describe("The user's preferred language."),
-  emails: z.array(
-    z.object({
-      value: z.string().email().describe("The user's email address."),
-    })
-  ).describe("List of email addresses."),
-  groups: z.array(
-    z.object({
-      value: z.string().describe("The group ID."),
-      display: z.string().describe("The group name."),
-    })
-  ).optional().describe("List of groups."),
-  photos: z.array(
-    z.object({
-      value: z.string().describe("The photo URL."),
-      type: z.string().describe("The type of photo."),
-    })
-  ).optional().describe("List of photos."),
-} satisfies z.ZodRawShape;
-
-// Zod-Objekt für Validierung
-const GetUserInfoSchema = z.object(getUserInfoOutputShape);
-
-// Register tool get-user-info
-server.registerTool(
-  "get-user-info",
-  {
-    title: "Get User Info",
-    description: "Retrieve information about the current user.",
-    inputSchema: {}, // keine Inputs
-    outputSchema: getUserInfoOutputShape, // nur die Shape, kein z.object(...)
-  },
-  async () => {
-    const authorization = requireHeader("authorization");
-    const res = await fetch(`https://m365-dev.d-velop.cloud/identityprovider/validate`, {
-      method: "GET",
-      headers: { Authorization: authorization },
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Upstream error ${res.status} ${res.statusText} - ${text}`);
-    }
-
-    const data = await res.json();
-
-    // 1) Zod-Validierung
-    const validated = GetUserInfoSchema.parse(data);
-
-    // 2) ToolResponse-Envelope zurückgeben
-    return {
-      // Ein kurzer Text (optional, aber 'content' ist required)
-      content: [
-        {
-          type: "text",
-          text: `User info retrieved for ${validated.displayName} (${validated.userName}).`,
-        },
-      ],
-      // Das strukturierte Ergebnis passend zu 'outputSchema'
-      structuredContent: validated,
-    };
-  }
-);
-
 // Output-Shape für list-users
 const listUsersOutputShape = {
   totalResults: z.number().describe("Total number of users."),
@@ -234,7 +165,7 @@ server.registerTool(
 const createTaskInputShape = {
   subject: z.string().min(1).describe("The subject/title of the task."),
   description: z.string().optional().describe("A descriptive text of the task."),
-  assignees: z.array(z.string().min(1)).min(1).describe("List of user or group IDs to assign the task to."),
+  assignees: z.array(z.string().min(1)).min(1).describe("List of user IDs or group IDs to assign the task to. Must be retrieved via the list-users tool."),
   dueDate: z.string().regex(
     /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(Z|([+-]\d{2}:\d{2})))?$/,
     "Must be RFC3339 format (e.g., 2025-10-16 or 2025-10-16T00:00:00Z)"
@@ -292,49 +223,49 @@ server.registerTool(
 );
 
 
-// Output-Shape für get-tasks
-const getTasksOutputShape = {
+// Output shape for list-tasks
+const listTasksOutputShape = {
   _embedded: z.object({
     tasks: z.array(
       z.object({
-        subject: z.string().describe("The subject/title of the task."),
-        description: z.string().optional().describe("Description of the task."),
-        assignedUsers: z.array(z.string()).describe("List of assigned user IDs."),
-        assignedGroups: z.array(z.string()).optional().describe("List of assigned group IDs."),
+        subject: z.string().describe("The subject or title of the task."),
+        description: z.string().optional().describe("Detailed description of the task."),
+        assignedUsers: z.array(z.string()).describe("Array of assigned user IDs."),
+        assignedGroups: z.array(z.string()).optional().describe("Array of assigned group IDs."),
         senderLabel: z.string().describe("Display name of the sender."),
-        sender: z.string().describe("Sender ID."),
+        sender: z.string().describe("Unique sender ID."),
         receiveDate: z.string().describe("Date when the task was received."),
-        dueDate: z.string().describe("Due date of the task."),
-        priority: z.number().describe("Priority of the task."),
-        id: z.string().describe("Unique task ID."),
-        completed: z.boolean().describe("Completion status."),
-        editor: z.string().optional().describe("Editor ID."),
-        editorLabel: z.string().optional().describe("Editor display name."),
+        dueDate: z.string().describe("Deadline for the task."),
+        priority: z.number().describe("Priority level of the task."),
+        id: z.string().describe("Unique identifier for the task."),
+        completed: z.boolean().describe("Indicates whether the task is completed."),
+        editor: z.string().optional().describe("Editor ID if applicable."),
+        editorLabel: z.string().optional().describe("Display name of the editor."),
         correlationKey: z.string().optional().describe("Correlation key for idempotency."),
-        readByCurrentUser: z.boolean().describe("Whether the current user has read the task."),
-        orderValue: z.number().describe("Order value for sorting."),
-        retentionTime: z.string().optional().describe("Retention time (e.g., P30D)."),
-        lockHolder: z.string().optional().describe("Lock holder ID."),
-        dmsReferences: z.array(z.string()).optional().describe("References to DMS documents."),
+        readByCurrentUser: z.boolean().describe("Indicates if the current user has read the task."),
+        orderValue: z.number().describe("Numeric value for sorting tasks."),
+        retentionTime: z.string().optional().describe("Retention period (e.g., P30D)."),
+        lockHolder: z.string().optional().describe("ID of the user holding the lock."),
+        dmsReferences: z.array(z.string()).optional().describe("References to related DMS documents."),
         actionScopes: z.record(z.array(z.string())).describe("Available actions and their scopes."),
-        undelivered: z.boolean().describe("Whether the task was undelivered."),
-        _links: z.record(z.any()).describe("Links related to the task."),
+        undelivered: z.boolean().describe("Indicates if the task was undelivered."),
+        _links: z.record(z.any()).describe("Hyperlinks related to the task."),
       })
     ),
   }),
   _links: z.record(z.any()).describe("Links for the search result."),
 } satisfies z.ZodRawShape;
 
-const GetTasksSchema = z.object(getTasksOutputShape);
+const ListTasksSchema = z.object(listTasksOutputShape);
 
-// Register tool get-tasks
+// Register tool list-tasks
 server.registerTool(
-  "get-tasks",
+  "list-tasks",
   {
-    title: "Get Tasks",
-    description: "Retrieve all tasks ordered by received date in ascending order.",
-    inputSchema: {}, // keine Eingaben, Body ist fix
-    outputSchema: getTasksOutputShape,
+    title: "List Tasks",
+    description: "Retrieve all tasks sorted by received date in ascending order.",
+    inputSchema: {}, // No input required, body is fixed
+    outputSchema: listTasksOutputShape,
   },
   async () => {
     const authorization = requireHeader("authorization");
@@ -360,10 +291,10 @@ server.registerTool(
 
     const data = await res.json();
 
-    // Validierung gegen das Schema
-    const validated = GetTasksSchema.parse(data);
+    // Validate against schema
+    const validated = ListTasksSchema.parse(data);
 
-    // MCP-konforme Antwort zurückgeben
+    // Return MCP-compliant response
     return {
       content: [
         {
